@@ -1,15 +1,15 @@
-# CI/CD Pipeline with GitHub Actions (Azure)
-
-## Overview
-Automated deployment of a web application to Azure VM using GitHub Actions.
+#  Advanced CI/CD Pipeline (Azure + Docker)
 
 ## Features
-- Auto deployment on push
-- Secure SSH connection
-- Nginx web server deployment
+- Automated testing
+- Dockerized application
+- Multi-server deployment
+- Rollback mechanism
 
-## Workflow
-Push → GitHub Actions → Azure VM → Live website
+## Pipeline
+Push → Test → Build → Deploy → Rollback
 
-## Run
-git push
+## Infrastructure
+- Azure VMs
+- Docker containers
+- GitHub Actions

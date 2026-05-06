@@ -1,4 +1,4 @@
-name: Deploy to Azure VM
+name: Advanced CI/CD Pipeline
 
 on:
   push:
@@ -6,29 +6,123 @@ on:
       - main
 
 jobs:
-  deploy:
+
+  # -------------------------
+  # 1. TEST STAGE
+  # -------------------------
+  test:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v3
 
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Run tests
+        run: |
+          chmod +x test.sh
+          ./test.sh
 
-      - name: Copy files to VM
+  # -------------------------
+  # 2. BUILD STAGE
+  # -------------------------
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build Docker image
+        run: docker build -t devops-app .
+
+  # -------------------------
+  # 3. DEPLOY TO VM1
+  # -------------------------
+  deploy_vm1:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Copy files to VM1
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.VM_IP }}
+          host: ${{ secrets.VM1_IP }}
           username: azureuser
-          key: ${{ secrets.SSH_KEY }}
-          source: "index.html"
-          target: "/home/azureuser/"
+          key: ${{ secrets.SSH_KEY_VM1 }}
+          source: "."
+          target: "/home/azureuser/app"
 
-      - name: Deploy on VM
+      - name: Deploy on VM1 with rollback
         uses: appleboy/ssh-action@v0.1.10
         with:
-          host: ${{ secrets.VM_IP }}
+          host: ${{ secrets.VM1_IP }}
           username: azureuser
-          key: ${{ secrets.SSH_KEY }}
+          key: ${{ secrets.SSH_KEY_VM1 }}
           script: |
-            sudo mv /home/azureuser/index.html /var/www/html/index.html
-            sudo systemctl restart nginx
+            set -e
+
+            cd /home/azureuser/app
+
+            # Backup current image
+            docker tag devops-app devops-app:backup || true
+
+            # Build new image
+            docker build -t devops-app .
+
+            # Stop old container
+            docker stop web || true
+            docker rm web || true
+
+            # Run new container
+            if docker run -d -p 80:80 --name web devops-app; then
+              echo "VM1 deployment successful ✅"
+            else
+              echo "VM1 deployment failed ❌ Rolling back..."
+
+              docker run -d -p 80:80 --name web devops-app:backup
+            fi
+
+  # -------------------------
+  # 4. DEPLOY TO VM2
+  # -------------------------
+  deploy_vm2:
+    runs-on: ubuntu-latest
+    needs: deploy_vm1   # sequential (safer)
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Copy files to VM2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM2_IP }}
+          username: azureuser
+          key: ${{ secrets.SSH_KEY_VM2 }}
+          source: "."
+          target: "/home/azureuser/app"
+
+      - name: Deploy on VM2 with rollback
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.VM2_IP }}
+          username: azureuser
+          key: ${{ secrets.SSH_KEY_VM2 }}
+          script: |
+            set -e
+
+            cd /home/azureuser/app
+
+            docker tag devops-app devops-app:backup || true
+            docker build -t devops-app .
+
+            docker stop web || true
+            docker rm web || true
+
+            if docker run -d -p 80:80 --name web devops-app; then
+              echo "VM2 deployment successful ✅"
+            else
+              echo "VM2 deployment failed ❌ Rolling back..."
+
+              docker run -d -p 80:80 --name web devops-app:backup
+            fi
